@@ -5,7 +5,7 @@ package cmd
 
 import (
 	"github.com/dotandev/hintents/internal/localization"
-	"github.com/dotandev/hintents/internal/logger"
+	"github.com/dotandev/hintents/internal/updater"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +14,6 @@ var (
 	TimestampFlag int64
 	WindowFlag    int64
 	ProfileFlag   bool
-	LogLevelFlag  string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -25,12 +24,12 @@ var rootCmd = &cobra.Command{
 debug failed Soroban transactions and analyze smart contract execution.
 
 Key features:
-  - Debug failed transactions with detailed error traces
-  - Simulate transaction execution locally
-  - Track token flows and contract events
-  - Manage debugging sessions for complex workflows
-  - Cache transaction data for offline analysis
-  - Local WASM replay for rapid contract development
+  • Debug failed transactions with detailed error traces
+  • Simulate transaction execution locally
+  • Track token flows and contract events
+  • Manage debugging sessions for complex workflows
+  • Cache transaction data for offline analysis
+  • Local WASM replay for rapid contract development
 
 Examples:
   erst debug abc123...def                    Debug a transaction
@@ -41,13 +40,17 @@ Examples:
 
 Get started with 'erst debug --help' or visit the documentation.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Set log level if specified
-		if LogLevelFlag != "" {
-			level := logger.ParseLevel(LogLevelFlag)
-			logger.SetLevel(level)
-			logger.Logger.Debug("Log level set", "level", LogLevelFlag)
+		// Load localizations
+		if err := localization.LoadTranslations(); err != nil {
+			return err
 		}
-		return localization.LoadTranslations()
+
+		// Show "Upgrade available" banner from last run's cached check (non-blocking)
+		updater.ShowBannerFromCache(Version)
+		// Ping version endpoint asynchronously for next run
+		checkForUpdatesAsync()
+
+		return nil
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -57,6 +60,16 @@ Get started with 'erst debug --help' or visit the documentation.`,
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
 	return rootCmd.Execute()
+}
+
+// checkForUpdatesAsync runs the update check in a goroutine to not block CLI startup
+func checkForUpdatesAsync() {
+	// Run update check in background goroutine
+	go func() {
+		// Use the Version variable from version.go
+		checker := updater.NewChecker(Version)
+		checker.CheckForUpdates()
+	}()
 }
 
 func init() {
@@ -82,12 +95,28 @@ func init() {
 		"Enable CPU/Memory profiling and generate a flamegraph SVG",
 	)
 
-	rootCmd.PersistentFlags().StringVar(
-		&LogLevelFlag,
-		"log-level",
-		"",
-		"Set log level (trace, debug, info, warn, error). Applies to both Go and Rust components",
-	)
+	// Define command groups for better organization
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "core",
+		Title: "Core Debugging Commands:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "testing",
+		Title: "Testing & Validation Commands:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "management",
+		Title: "Session & Cache Management:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "development",
+		Title: "Development Tools:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "utility",
+		Title: "Utility Commands:",
+	})
 
 	// Register commands
+	rootCmd.AddCommand(statsCmd)
 }

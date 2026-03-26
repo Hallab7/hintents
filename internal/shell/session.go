@@ -122,8 +122,12 @@ func (s *Session) buildInvocationEnvelope(contractID, function string, args []st
 
 // updateLedgerState updates the session's ledger state based on simulation results
 func (s *Session) updateLedgerState(resp *simulator.SimulationResponse) {
-	// Increment ledger sequence
-	s.ledgerSequence++
+	// Safely increment ledger sequence with overflow protection
+	if err := s.incrementLedgerSequence(); err != nil {
+		// Log error but don't fail the operation - reset to safe value
+		fmt.Printf("Warning: ledger sequence overflow detected, resetting to 1: %v\n", err)
+		s.ledgerSequence = 1
+	}
 
 	// Update timestamp
 	now := time.Now().Unix()
@@ -134,6 +138,18 @@ func (s *Session) updateLedgerState(resp *simulator.SimulationResponse) {
 
 	// TODO: Extract and update ledger entries from simulation response
 	// This would involve parsing the ResultMetaXDR to get state changes
+}
+
+// incrementLedgerSequence safely increments the ledger sequence with overflow protection
+func (s *Session) incrementLedgerSequence() error {
+	const maxSafeUint32 = uint32(4294967294) // math.MaxUint32 - 1
+	
+	if s.ledgerSequence >= maxSafeUint32 {
+		return fmt.Errorf("ledger sequence %d would overflow uint32 boundary", s.ledgerSequence)
+	}
+	
+	s.ledgerSequence++
+	return nil
 }
 
 // GetStateSummary returns a summary of the current ledger state

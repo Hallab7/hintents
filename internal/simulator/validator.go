@@ -293,6 +293,12 @@ func (v *Validator) validateLedgerSequence(sequence uint32) error {
 		return &ValidationError{Field: "ledger_sequence", Message: "cannot be zero", Code: "ERR_INVALID_SEQUENCE"}
 	}
 
+	// Check for uint32 overflow boundary - prevent sequences that would overflow on increment
+	const maxSafeUint32 = uint32(4294967294) // math.MaxUint32 - 1
+	if sequence >= maxSafeUint32 {
+		return &ValidationError{Field: "ledger_sequence", Message: "sequence too close to uint32 overflow boundary", Code: "ERR_OVERFLOW_RISK"}
+	}
+
 	if v.strictMode && sequence > 1000000000 {
 		return &ValidationError{Field: "ledger_sequence", Message: "exceeds reasonable limit", Code: "ERR_VALUE_TOO_HIGH"}
 	}

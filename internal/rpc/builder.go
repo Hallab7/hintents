@@ -127,6 +127,20 @@ func WithRequestTimeout(d time.Duration) ClientOption {
 	}
 }
 
+// WithTotalTimeout sets a global timeout for multi-node failover loops.
+// This caps the total time spent across all nodes during failover operations.
+// If not set, the default from NetworkConfig is used.
+func WithTotalTimeout(d time.Duration) ClientOption {
+	return func(b *clientBuilder) error {
+		if b.config == nil {
+			cfg := b.getConfig(b.network)
+			b.config = &cfg
+		}
+		b.config.TotalTimeout = d
+		return nil
+	}
+}
+
 func WithHTTPClient(client *http.Client) ClientOption {
 	return func(b *clientBuilder) error {
 		b.httpClient = client

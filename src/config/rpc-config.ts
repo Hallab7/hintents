@@ -13,6 +13,7 @@ export interface RPCConfig {
     circuitBreakerThreshold: number;
     circuitBreakerTimeout: number;
     maxRedirects: number;
+    totalTimeout?: number; // Global timeout for multi-node failover loops (ms)
     headers?: Record<string, string>;
     middleware?: SDKMiddleware[];
 }
@@ -61,6 +62,7 @@ export class RPCConfigParser {
         rpc?: string | string[];
         timeout?: number;
         retries?: number;
+        totalTimeout?: number;
     }): RPCConfig {
         // Get URLs from CLI args or environment variable
         const urlInput = options.rpc || process.env.STELLAR_RPC_URLS;
@@ -77,6 +79,7 @@ export class RPCConfigParser {
             urls,
             timeout: options.timeout,
             retries: options.retries,
+            totalTimeout: options.totalTimeout,
             // leave other fields undefined so defaults applier can fill
             retryDelay: undefined as any,
             circuitBreakerThreshold: undefined as any,
@@ -92,6 +95,7 @@ export class RPCConfigParser {
             circuitBreakerThreshold: 5,
             circuitBreakerTimeout: 60000,
             maxRedirects: 5,
+            totalTimeout: partial.totalTimeout ?? 60000, // Default 60 seconds for failover
         };
 
         // Phase 3: validate using pluggable validators

@@ -121,72 +121,99 @@ export class FallbackRPCClient {
         const startTime = Date.now();
         let lastError: Error | null = null;
 
-        for (let attempt = 0; attempt < this.endpoints.length; attempt++) {
-            const endpoint = this.getNextHealthyEndpoint();
+        // Apply global timeout if configured
+        const globalTimeoutMs = this.config.totalTimeout;
+        const timeoutPromise = globalTimeoutMs && globalTimeoutMs > 0 
+            ? new Promise<never>((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error(`Global timeout exceeded after ${globalTimeoutMs}ms`));
+                }, globalTimeoutMs);
+            })
+            : null;
 
-            if (!endpoint) {
-                throw new Error('All RPC endpoints are unavailable');
-            }
-
-            try {
-                endpoint.totalRequests++;
-
-                logger.verbose(LogCategory.RPC, `→ ${ctx.method} ${ctx.path}`);
-                logger.verboseIndent(LogCategory.RPC, `Endpoint: ${endpoint.url}`);
-
-                const requestStartTime = Date.now();
-                const client = this.clients.get(endpoint.url)!;
-
-                const requestSize = ctx.data ? JSON.stringify(ctx.data).length : 0;
-                logger.verboseIndent(LogCategory.RPC, `${ctx.method} request to ${ctx.path}`);
-                logger.verboseIndent(LogCategory.RPC, `Request size: ${logger.formatBytes(requestSize)}`);
-
-                const response = await this.executeWithRetry(client, ctx.method as 'GET' | 'POST', ctx.path, ctx.data, ctx.headers);
-
-                const duration = Date.now() - requestStartTime;
-                this.updateMetrics(endpoint, duration, true);
-
-                this.markSuccess(endpoint);
-                this.currentIndex = 0;
-
-                const responseSize = response.data ? JSON.stringify(response.data).length : 0;
-                logger.verbose(LogCategory.RPC, `← Response received (${duration}ms)`);
-                logger.verboseIndent(LogCategory.RPC, `Status: ${response.status} ${response.statusText}`);
-                logger.verboseIndent(LogCategory.RPC, `Response size: ${logger.formatBytes(responseSize)}`);
-
-                return {
-                    data: response.data,
-                    status: response.status,
-                    duration,
-                    endpoint: endpoint.url,
-                    metadata: { ...ctx.metadata },
-                };
-
-            } catch (error) {
-                lastError = error as Error;
-                const duration = Date.now() - startTime;
-                this.updateMetrics(endpoint, duration, false);
-
-                if (this.isRetryableError(error)) {
-                    logger.warn(`RPC request failed: ${endpoint.url}`);
-
-                    if (axios.isAxiosError(error)) {
-                        logger.verbose(LogCategory.ERROR, `Request error: ${error.message}`);
-                        if (error.code) logger.verboseIndent(LogCategory.ERROR, `Code: ${error.code}`);
+        const executeWithGlobalTimeout = async (): Promise<SDKResponse<T>> => {
+            for (let attempt = 0; attempt < this.endpoints.length; attempt++) {
+                // Check if we've exceeded the global timeout
+                if (globalTimeoutMs && globalTimeoutMs > 0) {
+                    const elapsed = Date.now() - startTime;
+                    if (elapsed >= globalTimeoutMs) {
+                        throw new Error(`Global timeout exceeded after ${elapsed}ms`);
                     }
+                }
 
-                    this.markFailure(endpoint);
-                    continue;
-                } else {
-                    this.markFailure(endpoint);
-                    throw error;
+                const endpoint = this.getNextHealthyEndpoint();
+
+                if (!endpoint) {
+                    throw new Error('All RPC endpoints are unavailable');
+                }
+
+                try {
+                    endpoint.totalRequests++;
+
+                    logger.verbose(LogCategory.RPC, `→ ${ctx.method} ${ctx.path}`);
+                    logger.verboseIndent(LogCategory.RPC, `Endpoint: ${endpoint.url}`);
+
+                    const requestStartTime = Date.now();
+                    const client = this.clients.get(endpoint.url)!;
+
+                    const requestSize = ctx.data ? JSON.stringify(ctx.data).length : 0;
+                    logger.verboseIndent(LogCategory.RPC, `${ctx.method} request to ${ctx.path}`);
+                    logger.verboseIndent(LogCategory.RPC, `Request size: ${logger.formatBytes(requestSize)}`);
+
+                    const response = await this.executeWithRetry(client, ctx.method as 'GET' | 'POST', ctx.path, ctx.data, ctx.headers);
+
+                    const duration = Date.now() - requestStartTime;
+                    this.updateMetrics(endpoint, duration, true);
+
+                    this.markSuccess(endpoint);
+                    this.currentIndex = 0;
+
+                    const responseSize = response.data ? JSON.stringify(response.data).length : 0;
+                    logger.verbose(LogCategory.RPC, `← Response received (${duration}ms)`);
+                    logger.verboseIndent(LogCategory.RPC, `Status: ${response.status} ${response.statusText}`);
+                    logger.verboseIndent(LogCategory.RPC, `Response size: ${logger.formatBytes(responseSize)}`);
+
+                    return {
+                        data: response.data,
+                        status: response.status,
+                        duration,
+                        endpoint: endpoint.url,
+                        metadata: { ...ctx.metadata },
+                    };
+
+                } catch (error) {
+                    lastError = error as Error;
+                    const duration = Date.now() - startTime;
+                    this.updateMetrics(endpoint, duration, false);
+
+                    if (this.isRetryableError(error)) {
+                        logger.warn(`RPC request failed: ${endpoint.url}`);
+
+                        if (axios.isAxiosError(error)) {
+                            logger.verbose(LogCategory.ERROR, `Request error: ${error.message}`);
+                            if (error.code) logger.verboseIndent(LogCategory.ERROR, `Code: ${error.code}`);
+                        }
+
+                        this.markFailure(endpoint);
+                        continue;
+                    } else {
+                        this.markFailure(endpoint);
+                        throw error;
+                    }
                 }
             }
-        }
 
-        const totalDuration = Date.now() - startTime;
-        logger.error(`All RPC endpoints failed after ${totalDuration}ms`);
-        throw new Error(`All RPC endpoints failed: ${lastError?.message}`);
+            const totalDuration = Date.now() - startTime;
+            logger.error(`All RPC endpoints failed after ${totalDuration}ms`);
+            throw new Error(`All RPC endpoints failed: ${lastError?.message}`);
+        };
+
+        // Race between the execution and the global timeout
+        if (timeoutPromise) {
+            return Promise.race([executeWithGlobalTimeout(), timeoutPromise]);
+        } else {
+            return executeWithGlobalTimeout();
+        }
     }
 
     /**

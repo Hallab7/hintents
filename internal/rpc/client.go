@@ -71,6 +71,7 @@ type NetworkConfig struct {
 	HorizonURL        string
 	NetworkPassphrase string
 	SorobanRPCURL     string
+	TotalTimeout      time.Duration // Global timeout for multi-node failover loops
 }
 
 // Predefined network configurations
@@ -80,6 +81,7 @@ var (
 		HorizonURL:        TestnetHorizonURL,
 		NetworkPassphrase: "Test SDF Network ; September 2015",
 		SorobanRPCURL:     TestnetSorobanURL,
+		TotalTimeout:      60 * time.Second, // Default 60 seconds for failover
 	}
 
 	MainnetConfig = NetworkConfig{
@@ -87,6 +89,7 @@ var (
 		HorizonURL:        MainnetHorizonURL,
 		NetworkPassphrase: "Public Global Stellar Network ; September 2015",
 		SorobanRPCURL:     MainnetSorobanURL,
+		TotalTimeout:      60 * time.Second, // Default 60 seconds for failover
 	}
 
 	FuturenetConfig = NetworkConfig{
@@ -94,6 +97,7 @@ var (
 		HorizonURL:        FuturenetHorizonURL,
 		NetworkPassphrase: "Test SDF Future Network ; October 2022",
 		SorobanRPCURL:     FuturenetSorobanURL,
+		TotalTimeout:      60 * time.Second, // Default 60 seconds for failover
 	}
 )
 
@@ -487,9 +491,26 @@ type StellarbeatResponse struct {
 
 // GetTransaction fetches the transaction details and full XDR data
 func (c *Client) GetTransaction(ctx context.Context, hash string) (*TransactionResponse, error) {
+	// Apply global timeout if configured
+	if c.Config.TotalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Config.TotalTimeout)
+		defer cancel()
+	}
+
 	attempts := c.endpointAttempts()
 	var failures []NodeFailure
 	for attempt := 0; attempt < attempts; attempt++ {
+		// Check if context has been cancelled or timed out
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return nil, errors.WrapRPCTimeout(fmt.Errorf("global timeout exceeded after %v", c.Config.TotalTimeout))
+			}
+			return nil, ctx.Err()
+		default:
+		}
+
 		resp, err := c.getTransactionAttempt(ctx, hash)
 		if err == nil {
 			c.markHorizonSuccess()
@@ -636,9 +657,26 @@ type GetLedgerEntriesResponse struct {
 //
 // GetLedgerHeader fetches ledger header details for a specific sequence with automatic fallback.
 func (c *Client) GetLedgerHeader(ctx context.Context, sequence uint32) (*LedgerHeaderResponse, error) {
+	// Apply global timeout if configured
+	if c.Config.TotalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Config.TotalTimeout)
+		defer cancel()
+	}
+
 	attempts := c.endpointAttempts()
 	var failures []NodeFailure
 	for attempt := 0; attempt < attempts; attempt++ {
+		// Check if context has been cancelled or timed out
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return nil, errors.WrapRPCTimeout(fmt.Errorf("global timeout exceeded after %v", c.Config.TotalTimeout))
+			}
+			return nil, ctx.Err()
+		default:
+		}
+
 		resp, err := c.getLedgerHeaderAttempt(ctx, sequence)
 		if err == nil {
 			c.markHorizonSuccess()
@@ -851,8 +889,24 @@ func (c *Client) GetLedgerEntries(ctx context.Context, keys []string) (map[strin
 	}
 
 	// Single batch - use existing failover logic
+	// Apply global timeout if configured
+	if c.Config.TotalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Config.TotalTimeout)
+		defer cancel()
+	}
+
 	attempts := c.endpointAttempts()
 	for attempt := 0; attempt < attempts; attempt++ {
+		// Check if context has been cancelled or timed out
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return nil, errors.WrapRPCTimeout(fmt.Errorf("global timeout exceeded after %v", c.Config.TotalTimeout))
+			}
+			return nil, ctx.Err()
+		default:
+		}
 
 		fetchedEntries, err := c.getLedgerEntriesAttempt(ctx, keysToFetch)
 		if err == nil {
@@ -1272,9 +1326,26 @@ type SimulateTransactionResponse struct {
 
 // SimulateTransaction calls Soroban RPC simulateTransaction using a base64 TransactionEnvelope XDR.
 func (c *Client) SimulateTransaction(ctx context.Context, envelopeXdr string) (*SimulateTransactionResponse, error) {
+	// Apply global timeout if configured
+	if c.Config.TotalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Config.TotalTimeout)
+		defer cancel()
+	}
+
 	attempts := c.endpointAttempts()
 	var failures []NodeFailure
 	for attempt := 0; attempt < attempts; attempt++ {
+		// Check if context has been cancelled or timed out
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return nil, errors.WrapRPCTimeout(fmt.Errorf("global timeout exceeded after %v", c.Config.TotalTimeout))
+			}
+			return nil, ctx.Err()
+		default:
+		}
+
 		resp, err := c.simulateTransactionAttempt(ctx, envelopeXdr)
 		if err == nil {
 			c.markSorobanSuccess()
@@ -1384,9 +1455,26 @@ func (c *Client) simulateTransactionAttempt(ctx context.Context, envelopeXdr str
 
 // GetHealth checks the health of the Soroban RPC endpoint.
 func (c *Client) GetHealth(ctx context.Context) (*GetHealthResponse, error) {
+	// Apply global timeout if configured
+	if c.Config.TotalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Config.TotalTimeout)
+		defer cancel()
+	}
+
 	attempts := c.endpointAttempts()
 	var failures []NodeFailure
 	for attempt := 0; attempt < attempts; attempt++ {
+		// Check if context has been cancelled or timed out
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return nil, errors.WrapRPCTimeout(fmt.Errorf("global timeout exceeded after %v", c.Config.TotalTimeout))
+			}
+			return nil, ctx.Err()
+		default:
+		}
+
 		resp, err := c.getHealthAttempt(ctx)
 		if err == nil {
 			c.markSorobanSuccess()
